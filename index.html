@@ -44,10 +44,6 @@
     <!-- Chart.js for Professional Accounting Visualizations -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-    <!-- Firebase (Firestore) for cross-device real-time sync -->
-    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
-
     <style>
         body {
             font-family: 'Tajawal', sans-serif;
@@ -943,25 +939,8 @@
             }, 3500);
         }
 
-        // ============ Firebase / Firestore Setup (Cross-Device Real-Time Sync) ============
-        const firebaseConfig = {
-            apiKey: "AIzaSyDbU3CN_xITEkXgRksxQHd6iMHxLXF2VmQ",
-            authDomain: "inventory-d7f91.firebaseapp.com",
-            projectId: "inventory-d7f91",
-            storageBucket: "inventory-d7f91.firebasestorage.app",
-            messagingSenderId: "768795252595",
-            appId: "1:768795252595:web:8220b611206873c9ff5706"
-        };
-        const fbApp = firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
-        // All data is kept in a single document for simplicity & atomic sync
-        const dbDocRef = db.collection("warfa_store").doc("main_ledger");
-        let isApplyingRemoteUpdate = false; // guards against feedback loops while a remote snapshot is being applied
-        let firestoreReady = false; // becomes true after the first snapshot arrives
-
         // Data Load & Save Lifecycles
         function saveDatabaseToStorage() {
-            // Keep a local offline backup too
             localStorage.setItem("traditional_market_items", JSON.stringify(items));
             localStorage.setItem("traditional_market_invoices", JSON.stringify(invoices));
             localStorage.setItem("traditional_market_audit_hist", JSON.stringify(auditHistory));
@@ -969,78 +948,9 @@
             localStorage.setItem("traditional_market_expenses", JSON.stringify(expenses));
             localStorage.setItem("traditional_market_parties", JSON.stringify(parties));
             localStorage.setItem("traditional_market_last_cash", JSON.stringify(lastClosingCash));
-
-            // Push to Firestore so other devices receive the update in real time.
-            // Skip pushing if this save was triggered while applying an incoming remote update.
-            if (isApplyingRemoteUpdate) return;
-            dbDocRef.set({
-                items: items,
-                invoices: invoices,
-                auditHistory: auditHistory,
-                activeAudit: activeAudit,
-                expenses: expenses,
-                parties: parties,
-                lastClosingCash: lastClosingCash,
-                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            }).catch(err => {
-                console.error("Firestore sync error:", err);
-                triggerToast("تعذر رفع التحديث للسحابة، تم الحفظ محليًا فقط", "danger");
-            });
         }
 
-        // Applies a fresh dataset (from Firestore or localStorage) into the in-memory state and re-renders the UI
-        function applyDatasetToApp(data) {
-            if (!data) return;
-            items = data.items || [];
-            invoices = data.invoices || [];
-            auditHistory = data.auditHistory || [];
-            activeAudit = data.activeAudit || null;
-            expenses = data.expenses || [];
-            parties = data.parties || [];
-            lastClosingCash = data.lastClosingCash || 0;
-            normalizeLoadedData();
-            refreshAllViews();
-        }
-
-        // Re-renders every visible section of the app (used after initial load and after remote updates)
-        function refreshAllViews() {
-            renderItemsTable();
-            renderInvoicesLedger();
-            renderAuditSessionView();
-            renderExpensesTable();
-            renderPartiesList('debtor');
-            renderPartiesList('creditor');
-            renderHistoricalAuditAccordion();
-            syncSystemDashboardKPIs();
-        }
-
-        // Starts listening for real-time changes from Firestore; other devices' edits will appear automatically
-        function initFirestoreSync() {
-            dbDocRef.onSnapshot((doc) => {
-                isApplyingRemoteUpdate = true;
-                if (doc.exists) {
-                    applyDatasetToApp(doc.data());
-                } else if (!firestoreReady) {
-                    // No cloud document yet: seed it from whatever is in localStorage (first-time migration)
-                    loadDatabaseFromLocalStorageOnly();
-                    normalizeLoadedData();
-                    refreshAllViews();
-                    isApplyingRemoteUpdate = false;
-                    saveDatabaseToStorage(); // pushes local data up to Firestore for the first time
-                    isApplyingRemoteUpdate = true;
-                }
-                firestoreReady = true;
-                isApplyingRemoteUpdate = false;
-            }, (err) => {
-                console.error("Firestore listen error:", err);
-                triggerToast("تعذر الاتصال بالسحابة، سيتم العمل بالبيانات المحلية", "danger");
-                loadDatabaseFromLocalStorageOnly();
-                normalizeLoadedData();
-                refreshAllViews();
-            });
-        }
-
-        function loadDatabaseFromLocalStorageOnly() {
+        function loadDatabaseFromStorage() {
             if(localStorage.getItem("traditional_market_items")) items = JSON.parse(localStorage.getItem("traditional_market_items"));
             if(localStorage.getItem("traditional_market_invoices")) invoices = JSON.parse(localStorage.getItem("traditional_market_invoices"));
             if(localStorage.getItem("traditional_market_audit_hist")) auditHistory = JSON.parse(localStorage.getItem("traditional_market_audit_hist"));
@@ -1048,9 +958,6 @@
             if(localStorage.getItem("traditional_market_expenses")) expenses = JSON.parse(localStorage.getItem("traditional_market_expenses"));
             if(localStorage.getItem("traditional_market_parties")) parties = JSON.parse(localStorage.getItem("traditional_market_parties"));
             if(localStorage.getItem("traditional_market_last_cash")) lastClosingCash = JSON.parse(localStorage.getItem("traditional_market_last_cash")) || 0;
-        }
-
-        function normalizeLoadedData() {
             
             // Map backward compatible attributes if missing
             items.forEach(i => {
@@ -1099,7 +1006,7 @@
 
         // Initialize App Lifecycle
         document.addEventListener("DOMContentLoaded", () => {
-            initFirestoreSync();
+            loadDatabaseFromStorage();
             
             // Mobile Sidebar Bindings
             document.getElementById("mobile-sidebar-toggle").addEventListener("click", () => {
@@ -2563,11 +2470,6 @@
                 localStorage.removeItem("traditional_market_expenses");
                 localStorage.removeItem("traditional_market_parties");
                 localStorage.removeItem("traditional_market_last_cash");
-                try {
-                    await dbDocRef.delete();
-                } catch (err) {
-                    console.error("Firestore wipe error:", err);
-                }
                 window.location.reload();
             }
         }
